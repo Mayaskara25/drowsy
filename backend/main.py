@@ -15,7 +15,10 @@ engine = create_engine(DB_URL, echo=False)
 SQLModel.metadata.create_all(engine)
 
 app = FastAPI(title="Drowsy Fleet Backend", version="0.1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# Restrict CORS in prod via ALLOWED_ORIGINS env; wildcard for local demo
+import os as _os
+_allowed = [o.strip() for o in _os.getenv("ALLOWED_ORIGINS", "*").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_allowed, allow_methods=["GET","POST"], allow_headers=["*"])
 
 # ---- helpers ----
 def upsert_vehicle(s: Session, vid: str, name: Optional[str]=None, fleet: Optional[str]=None):
@@ -84,9 +87,10 @@ def ingest_batch(payloads: List[FatigueEventPayload]):
         return {"ok": True, "ingested": count}
 
 @app.get("/api/vehicles")
-def list_vehicles():
+def list_vehicles(limit: int = 100):
+    limit = max(1, min(limit, 200))
     with Session(engine) as s:
-        vs = s.exec(select(Vehicle)).all()
+        vs = s.exec(select(Vehicle).limit(limit)).all()
         return [{"vehicleId": v.vehicle_id, "name": v.name, "lastState": v.last_state, "lastScore": v.last_score, "lastSeen": v.last_seen.isoformat() if v.last_seen else None} for v in vs]
 
 @app.get("/api/vehicles/{vid}")
@@ -98,6 +102,7 @@ def get_vehicle(vid: str):
 
 @app.get("/api/vehicles/{vid}/events")
 def vehicle_events(vid: str, limit: int = 50):
+    limit = max(1, min(limit, 200))  # cap to prevent OOM
     with Session(engine) as s:
         rows = s.exec(select(FatigueEvent).where(FatigueEvent.vehicle_id==vid).order_by(FatigueEvent.timestamp_start.desc()).limit(limit)).all()
         return [{"eventId": r.event_id, "timestampStart": r.timestamp_start.isoformat(), "timestampEnd": r.timestamp_end.isoformat(), "durationMs": r.duration_ms, "severity": r.severity, "maxFatigueScore": r.max_fatigue_score, "eyeClosure": r.eye_closure, "yawning": r.yawning, "headPoseAbnormal": r.head_pose_abnormal, "alertTriggered": r.alert_triggered, "recovered": r.recovered, "gps": {"lat": r.gps_lat, "lng": r.gps_lng}} for r in rows]
@@ -107,7 +112,9 @@ def dashboard_summary():
     with Session(engine) as s:
         total = len(s.exec(select(Vehicle)).all())
         all_events = s.exec(select(FatigueEvent)).all()
-        today = date.today()
+        # Use UTC date to match event timestamps (stored UTC)
+        from datetime import timezone as _tz
+        today = datetime.now(_tz.utc).date()
         today_events = [e for e in all_events if e.timestamp_start.date() == today]
         high = [e for e in today_events if e.severity == "HIGH"]
         return {"totalVehicles": total, "active": total, "fatigueEventsToday": len(today_events), "highRiskEvents": len(high)}

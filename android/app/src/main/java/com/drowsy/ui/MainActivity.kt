@@ -71,19 +71,15 @@ fun DrowsyScreen(vm: MonitorViewModel, camera: AndroidFrontCameraSource? = null)
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("DRIVER SAFETY", style = MaterialTheme.typography.headlineSmall)
         Box(Modifier.fillMaxWidth().height(220.dp).background(Color(0xFF111111))) {
-            // Real CameraX preview — falls back to status text if camera unavailable
-            if (camera != null && ui.facePresent || true) {
-                AndroidView(
-                    factory = { ctx ->
-                        PreviewView(ctx).apply {
-                            scaleType = PreviewView.ScaleType.FILL_CENTER
-                            // Bind preview use-case to the same lifecycle as analysis
-                            // (AndroidFrontCameraSource owns analysis; preview is added here for UX only)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            AndroidView(
+                factory = { ctx ->
+                    PreviewView(ctx).apply {
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                        if (camera != null) camera.attachPreview(this)
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                 Text(if (ui.facePresent) "Driver detected" else "No face", color = Color.White)
             }

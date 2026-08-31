@@ -32,4 +32,28 @@ for i in range(450):
         print(f"{t}ms score={score} state={sm.state.value} perclos={snap.perclos:.2f} yawns={snap.yawn_count}")
 
 print(f"Final state: {sm.state.value} (expect NORMAL after recovery)")
-print("Parity check DONE — compare with Kotlin FatigueParityTest.simulateParitySmoke")
+# Assert parity — CI gate (tolerance ±5 vs golden, final must be NORMAL)
+import sys
+golden = {10000: 65, 15000: 66}
+ok = True
+eng2 = FatigueEngine(); sm2 = DriverStateMachine()
+scores = {}
+for i in range(450):
+    t = i*100
+    if t < 8000: ear, mar, pitch = 0.30, 0.2, 0
+    elif t < 8500: ear, mar, pitch = 0.06, 0.2, 0
+    elif 8500 <= t <= 9500: ear, mar, pitch = 0.06, 0.70, 0
+    elif 9500 < t < 9800: ear, mar, pitch = 0.06, 0.2, 0
+    elif 9800 <= t <= 11200: ear, mar, pitch = 0.06, 0.75 if 10200 <= t <= 11200 else 0.2, 30
+    elif t < 11500: ear, mar, pitch = 0.06, 0.2, 30
+    else: ear, mar, pitch = 0.30, 0.2, 0
+    score, _ = eng2.update(frame(ear, mar, pitch, ts=t))
+    sm2.step(score, t)
+    if t in golden: scores[t] = score
+for ts, exp in golden.items():
+    if abs(scores[ts] - exp) > 8:
+        print(f"FAIL parity {ts}ms: got {scores[ts]} expected {exp}±8", file=sys.stderr); ok = False
+if sm2.state.value != "NORMAL":
+    print(f"FAIL final state {sm2.state.value} != NORMAL", file=sys.stderr); ok = False
+if ok: print("Parity CI PASSED")
+else: sys.exit(1)

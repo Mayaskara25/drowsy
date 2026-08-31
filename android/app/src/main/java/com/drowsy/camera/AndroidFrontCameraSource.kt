@@ -78,6 +78,9 @@ class AndroidFrontCameraSource(
         awaitClose { FrameHub.detach() }
     }
 
+    private var previewView: androidx.camera.view.PreviewView? = null
+    fun attachPreview(previewView: androidx.camera.view.PreviewView) { this.previewView = previewView }
+
     private fun bindAnalysis() {
         val provider = cameraProvider ?: return
         val exec = ensureExecutor()
@@ -85,29 +88,28 @@ class AndroidFrontCameraSource(
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setTargetResolution(android.util.Size(targetWidth, targetHeight))
             .build()
-        // We cannot capture callbackFlow channel here; instead use a shared MutableSharedFlow.
-        // Simpler: use a singleton channel holder that frames() collectors share via callbackFlow.
-        // For correctness with single collector (MonitorViewModel), use a global channel ref.
         analysis.setAnalyzer(exec) { imageProxy ->
             val bmp = imageProxy.toBitmapCorrect()
             if (bmp != null) {
-                val ts = imageProxy.imageInfo.timestamp / 1_000_000L // ns → ms monotonic
-                // Push to active collector if any — use global holder
+                val ts = imageProxy.imageInfo.timestamp / 1_000_000L
                 FrameHub.tryEmit(CameraFrame(bmp, ts))
             }
             imageProxy.close()
         }
         imageAnalysis = analysis
+        // Also bind Preview if view attached (UX only, not required for detection)
+        val preview = previewView?.let {
+            androidx.camera.core.Preview.Builder().setTargetResolution(android.util.Size(targetWidth, targetHeight)).build().also { p -> p.setSurfaceProvider(it.surfaceProvider) }
+        }
         try {
             provider.unbindAll()
             if (provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA)) {
-                provider.bindToLifecycle(
-                    lifecycleOwner,
-                    CameraSelector.DEFAULT_FRONT_CAMERA,
-                    analysis,
-                )
+                if (preview != null) {
+                    provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_FRONT_CAMERA, preview, analysis)
+                } else {
+                    provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_FRONT_CAMERA, analysis)
+                }
             } else {
-                // No front camera — leave unbound, caller sees empty flow
                 isRunning = false
             }
         } catch (_: Exception) {
@@ -123,8 +125,6 @@ class AndroidFrontCameraSource(
             val uBuffer = planes[1].buffer
             val vBuffer = planes[2].buffer
             val nv21 = ByteArray(width * height * 3 / 2)
-            // Y plane
-            yBuffer.get(nv21, 0, ySize)
             val yRowStride = planes[0].rowStride
             val uvRowStride = planes[1].rowStride
             val uvPixelStride = planes[1].pixelStride
