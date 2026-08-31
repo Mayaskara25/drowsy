@@ -27,13 +27,14 @@ class MediaPipeLandmarkerEngine(
     private var landmarker: FaceLandmarker? = null
     private var initError: Exception? = null
 
+    @Synchronized
     fun initialize(): Boolean {
         if (landmarker != null) return true
         return try {
             val base = BaseOptions.builder().setModelAssetPath(modelAssetPath).build()
             val opts = FaceLandmarker.FaceLandmarkerOptions.builder()
                 .setBaseOptions(base)
-                .setRunningMode(RunningMode.IMAGE)
+                .setRunningMode(RunningMode.VIDEO)
                 .setNumFaces(1)
                 .setMinFaceDetectionConfidence(minFaceDetectionConfidence)
                 .setMinFacePresenceConfidence(0.5f)
@@ -55,7 +56,7 @@ class MediaPipeLandmarkerEngine(
 
         return try {
             val mpImage = BitmapImageBuilder(frame.bitmap).build()
-            val result = lm.detect(mpImage)
+            val result = try { lm.detectForVideo(mpImage, frame.timestampMs) } finally { try { mpImage.close() } catch (_: Exception) {} }
             if (result.detections().isEmpty()) {
                 return PerceptionFrame(false, 0f, 0f, 0.1f, timestampMs = frame.timestampMs)
             }

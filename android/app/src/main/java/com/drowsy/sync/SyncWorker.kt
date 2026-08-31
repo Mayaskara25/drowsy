@@ -1,9 +1,11 @@
 package com.drowsy.sync
 
 import android.content.Context
+import androidx.room.withTransaction
 import androidx.work.*
 import com.drowsy.data.AppDatabase
 import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -20,11 +22,14 @@ import java.util.concurrent.TimeUnit
 class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        val backendUrl = inputData.getString(KEY_URL) ?: return@withContext Result.failure()
+        val backendUrl = inputData.getString(KEY_URL)
+            ?: return@withContext Result.retry() // no URL yet — retry when enqueued with URL
         val db = AppDatabase.get(applicationContext)
         val pending = db.fatigueEventDao().unsynced()
         if (pending.isEmpty()) return@withContext Result.success()
         val moshi = Moshi.Builder().build()
+        val listType = Types.newParameterizedType(List::class.java, Map::class.java)
+        val adapter = moshi.adapter<List<Map<String, Any>>>(listType)
         val payloads = pending.map { e ->
             mapOf(
                 "eventId" to e.eventId, "deviceId" to e.deviceId, "vehicleId" to e.vehicleId,
@@ -36,22 +41,27 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 "gps" to mapOf("lat" to e.gpsLat, "lng" to e.gpsLng), "trackingQuality" to e.trackingQuality,
             )
         }
-        val json = moshi.adapter(Any::class.java).toJson(payloads)
+        val json = adapter.toJson(payloads)
         return@withContext try {
-            val client = OkHttpClient.Builder().callTimeout(10, TimeUnit.SECONDS).build()
             val req = Request.Builder().url("$backendUrl/api/events/batch")
                 .post(json.toRequestBody("application/json".toMediaType())).build()
-            val resp = client.newCall(req).execute()
-            if (resp.isSuccessful) {
-                pending.forEach { db.fatigueEventDao().markSynced(it.eventId); db.syncQueueDao().deleteFor(it.eventId) }
-                Result.success()
-            } else {
-                pending.forEach { db.syncQueueDao().bumpAttempt(it.eventId) }
-                Result.retry()
+            HttpClientHolder.client.newCall(req).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    db.withTransaction {
+                        pending.forEach {
+                            db.fatigueEventDao().markSynced(it.eventId)
+                            db.syncQueueDao().deleteFor(it.eventId)
+                        }
+                    }
+                    Result.success()
+                } else {
+                    pending.forEach { db.syncQueueDao().bumpAttempt(it.eventId) }
+                    Result.retry()
+                }
             }
         } catch (_: Exception) {
             // offline — keep queued, retry later
-            pending.forEach { db.syncQueueDao().bumpAttempt(it.eventId) }
+            try { pending.forEach { db.syncQueueDao().bumpAttempt(it.eventId) } } catch (_: Exception) {}
             Result.retry()
         }
     }
@@ -73,5 +83,14 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
                 .build()
             WorkManager.getInstance(context).enqueue(req)
         }
+    }
+}
+
+internal object HttpClientHolder {
+    val client: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .callTimeout(15, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
     }
 }

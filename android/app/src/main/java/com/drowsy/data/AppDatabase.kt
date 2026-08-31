@@ -21,7 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var INSTANCE: AppDatabase? = null
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "drowsy.db")
-                .fallbackToDestructiveMigration()
+                .fallbackToDestructiveMigrationOnDowngrade()
                 .build().also { INSTANCE = it }
         }
         fun inMemory(context: Context): AppDatabase =
@@ -29,11 +29,12 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-/** Helper: save event + enqueue (Local DB §19-20, never blocks detection loop). */
+/** Helper: save event + enqueue transactionally (Local DB §19-20, never blocks detection loop). */
 suspend fun saveEvent(db: AppDatabase, event: FatigueEvent) {
-    db.fatigueEventDao().insert(event)
-    db.syncQueueDao().enqueue(SyncQueue(eventId = event.eventId))
-    // upsert vehicle last state
-    val v = db.vehicleDao().byId(event.vehicleId) ?: Vehicle(vehicleId = event.vehicleId, name = event.vehicleId)
-    db.vehicleDao().upsert(v.copy(lastScore = event.maxFatigueScore, lastState = event.severity, lastSeen = System.currentTimeMillis()))
+    db.withTransaction {
+        db.fatigueEventDao().insert(event)
+        db.syncQueueDao().enqueue(SyncQueue(eventId = event.eventId))
+        val v = db.vehicleDao().byId(event.vehicleId) ?: Vehicle(vehicleId = event.vehicleId, name = event.vehicleId)
+        db.vehicleDao().upsert(v.copy(lastScore = event.maxFatigueScore, lastState = event.severity, lastSeen = System.currentTimeMillis()))
+    }
 }

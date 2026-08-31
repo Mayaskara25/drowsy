@@ -39,13 +39,20 @@ data class FatigueThresholds(
     val yawnHighCount: Int = 3,
 )
 
+/** YAML/DataStore mapping — use FatigueThresholds as single source of truth via fromYaml(). */
 data class FatigueThresholdsYaml(
     val perclosWeight: Float = 0.35f,
     val closureWeight: Float = 0.25f,
     val yawnWeight: Float = 0.15f,
     val headPoseWeight: Float = 0.15f,
     val gazeWeight: Float = 0.10f,
-    val attentionThreshold: Int = 30,
-    val fatigueThreshold: Int = 55,
-    val highRiskThreshold: Int = 75,
-)
+    val attentionThreshold: Int = 31,
+    val fatigueThreshold: Int = 56,
+    val highRiskThreshold: Int = 76,
+) {
+    fun toThresholds(base: FatigueThresholds = FatigueThresholds()) = base.copy(
+        wPerclos = perclosWeight, wMaxClosure = closureWeight, wYawn = yawnWeight,
+        wHeadPose = headPoseWeight, wGaze = gazeWeight,
+        attention = attentionThreshold, fatigue = fatigueThreshold, highRisk = highRiskThreshold,
+    )
+}

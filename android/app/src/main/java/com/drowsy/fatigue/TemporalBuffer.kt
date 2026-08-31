@@ -59,27 +59,35 @@ class TemporalFeatureBuffer(
         val perclos = closed.toFloat() / total
         val ears = frames.mapNotNull { it.eye?.earMean }
         val meanEar = if (ears.isNotEmpty()) ears.average().toFloat() else 0f
-        // max closure: longest contiguous closed streak, extended to now if still closed
+        // max closure: longest contiguous closed streak, extended to now if still closed — clamp start to window cutoff
+        val cutoff = frames.first().timestampMs // window start after prune
         var maxClosure = 0L; var curStart: Long? = null
         for (fr in frames) {
             if (fr.eye?.eyesClosed == true && fr.facePresent) {
-                if (curStart == null) curStart = fr.timestampMs
+                if (curStart == null) curStart = maxOf(fr.timestampMs, cutoff)
                 val cur = fr.timestampMs - curStart
                 if (cur > maxClosure) maxClosure = cur
             } else { curStart = null }
         }
-        closureStartMs?.let { curDur -> val cur = nowMs - curDur; if (cur > maxClosure) maxClosure = cur }
-        // blink count: every open->closed->open transition (prolonged handled separately)
+        closureStartMs?.let { start ->
+            val clampedStart = maxOf(start, cutoff)
+            val cur = nowMs - clampedStart; if (cur > maxClosure) maxClosure = cur
+        }
+        // blink count: only closures with 100ms < dur < eyeClosureMinMs (short blinks), prolonged excluded
         var blinkCount = 0; var inClosure = false; var cStart: Long? = null
         for (fr in frames) {
             val closedNow = fr.eye?.eyesClosed == true && fr.facePresent
             if (closedNow && !inClosure) { inClosure = true; cStart = fr.timestampMs }
-            else if (!closedNow && inClosure) { blinkCount++; inClosure = false; cStart = null }
+            else if (!closedNow && inClosure) {
+                val dur = fr.timestampMs - (cStart ?: fr.timestampMs)
+                if (dur in 100 until pconfig.eyeClosureMinMs) blinkCount++
+                inClosure = false; cStart = null
+            }
         }
         val headAb = frames.count { it.headPose?.abnormal == true }.toFloat() / total
         val gazeOff = frames.count { (it.gaze?.forwardProb ?: 1f) < 0.5f }.toFloat() / total
         val tq = frames.map { it.trackingQuality }.average().toFloat()
-        val currentlyClosed = frames.last().eye?.eyesClosed == true
+        val currentlyClosed = frames.last().let { it.eye?.eyesClosed == true && it.facePresent }
         val prolonged = maxClosure >= pconfig.eyeClosureMinMs
         var yawnCount = yawnEvents.size
         yawnStartMs?.let { if (nowMs - it >= pconfig.marYawnMinDurationMs) yawnCount++ }

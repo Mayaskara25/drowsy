@@ -3,12 +3,13 @@ package com.drowsy.alerts
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
 import com.drowsy.fatigue.DriverState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.sin
 
 enum class AlertLevel { NONE, ATTENTION, FATIGUE, HIGH_RISK }
@@ -31,14 +32,16 @@ interface AlertManager {
     fun fatigueWarning(nowMs: Long)
     fun highRiskWarning(nowMs: Long)
     fun stop(nowMs: Long)
-    fun handleState(state: DriverState, nowMs: Long, canAlert: Boolean)
+    /** Returns true if a beep was actually triggered (for cooldown). */
+    fun handleState(state: DriverState, nowMs: Long, canAlert: Boolean): Boolean
 }
 
 class PhoneAlertManager(
-    private val context: Context,
+    context: Context,
     private val beepOnAttention: Boolean = false,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default),
+    private val scope: CoroutineScope,
 ) : AlertManager {
+    private val appContext = context.applicationContext
 
     var active: AlertLevel = AlertLevel.NONE
         private set
@@ -68,28 +71,36 @@ class PhoneAlertManager(
         // stop ongoing AudioTrack if needed
     }
 
-    override fun handleState(state: DriverState, nowMs: Long, canAlert: Boolean) {
-        when {
-            state == DriverState.HIGH_RISK && canAlert -> highRiskWarning(nowMs)
-            state == DriverState.FATIGUE && canAlert -> fatigueWarning(nowMs)
-            state == DriverState.ATTENTION && beepOnAttention && canAlert -> attention(nowMs)
-            state == DriverState.NORMAL -> stop(nowMs)
-            // ATTENTION without beep → no audio, just UI
+    override fun handleState(state: DriverState, nowMs: Long, canAlert: Boolean): Boolean {
+        return when {
+            state == DriverState.HIGH_RISK && canAlert -> { highRiskWarning(nowMs); true }
+            state == DriverState.FATIGUE && canAlert -> { fatigueWarning(nowMs); true }
+            state == DriverState.ATTENTION && beepOnAttention && canAlert -> { attention(nowMs); true }
+            state == DriverState.NORMAL -> { stop(nowMs); false }
+            state == DriverState.ATTENTION -> { if (active != AlertLevel.NONE && active != AlertLevel.ATTENTION) stop(nowMs); false }
+            else -> false
         }
     }
 
-    private fun beep(freqHz: Int, durationMs: Int) {
+    private suspend fun beep(freqHz: Int, durationMs: Int) = withContext(Dispatchers.IO) {
+        var track: AudioTrack? = null
         try {
-            val sr = 44100; val n = (sr * durationMs / 1000)
+            val sr = 44100
+            val n = (sr * durationMs / 1000)
             val buf = ShortArray(n) { i -> (Short.MAX_VALUE * 0.3 * sin(2 * Math.PI * freqHz * i / sr)).toInt().toShort() }
-            val track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            val minBuf = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val bufSize = maxOf(minBuf, buf.size * 2)
+            track = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(buf.size * 2)
+                .setBufferSizeInBytes(bufSize)
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
-            track.write(buf, 0, buf.size); track.play()
-            Thread.sleep(durationMs.toLong() + 20); track.stop(); track.release()
+            track.write(buf, 0, buf.size)
+            track.play()
+            delay(durationMs.toLong() + 20)
+            track.stop()
         } catch (_: Exception) { /* headless / no audio device — still logs history */ }
+        finally { try { track?.release() } catch (_: Exception) {} }
     }
 }

@@ -4,11 +4,13 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.coroutines.coroutineContext
 
 /**
  * ESP32-S3 / generic MJPEG + snapshot (§17-20).
@@ -46,25 +48,25 @@ class NetworkCameraSource(
 
     private suspend fun emitMjpeg(collector: kotlinx.coroutines.flow.FlowCollector<CameraFrame>) {
         val url = URL("$baseUrl/stream")
-        val conn = (url.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = jpegQualityTimeoutMs
-            readTimeout = 0 // streaming
-            setRequestProperty("Accept", "multipart/x-mixed-replace")
-        }
-        conn.connect()
-        if (conn.responseCode != 200) throw IllegalStateException("HTTP ${conn.responseCode}")
-        val input = conn.inputStream
-        val boundary = conn.headerFields["Content-Type"]?.firstOrNull()
-            ?.substringAfter("boundary=")?.trim() ?: "--frame"
-        val buffer = ByteArray(128 * 1024)
-        var leftover = ByteArray(0)
+        var conn: HttpURLConnection? = null
         try {
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = jpegQualityTimeoutMs
+                readTimeout = 5000 // allow cancellation via timeout, not infinite block
+                setRequestProperty("Accept", "multipart/x-mixed-replace")
+            }
+            conn.connect()
+            if (conn.responseCode != 200) throw IllegalStateException("HTTP ${conn.responseCode}")
+            val input = conn.inputStream
+            val buffer = ByteArray(64 * 1024)
+            var leftover = ByteArray(0)
+            val opts = BitmapFactory.Options().apply { inSampleSize = 1; inPreferredConfig = Bitmap.Config.RGB_565 }
             while (isRunning) {
-                val n = input.read(buffer)
+                coroutineContext.ensureActive()
+                val n = try { input.read(buffer) } catch (_: Exception) { break }
                 if (n <= 0) break
                 val chunk = leftover + buffer.copyOf(n)
-                // Scan for JPEG SOI/EOI (FF D8 ... FF D9)
                 var start = -1; var end = -1
                 for (i in 0 until chunk.size - 1) {
                     if (chunk[i] == 0xFF.toByte() && chunk[i+1] == 0xD8.toByte() && start==-1) start=i
@@ -73,7 +75,7 @@ class NetworkCameraSource(
                 if (start!=-1 && end!=-1) {
                     val jpeg = chunk.copyOfRange(start, end+1)
                     val t0 = System.currentTimeMillis()
-                    val bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+                    val bmp = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size, opts)
                     if (bmp != null) {
                         latencyMs = System.currentTimeMillis() - t0
                         collector.emit(CameraFrame(bmp, System.currentTimeMillis()))
@@ -81,28 +83,31 @@ class NetworkCameraSource(
                     leftover = if (end+1 < chunk.size) chunk.copyOfRange(end+1, chunk.size) else ByteArray(0)
                 } else {
                     leftover = chunk
-                    if (leftover.size > 512*1024) leftover = leftover.takeLast(256*1024).toByteArray()
+                    if (leftover.size > 512*1024) leftover = leftover.copyOfRange(leftover.size - 256*1024, leftover.size)
                 }
             }
-        } finally { try { input.close() } catch (_: Exception) {}; conn.disconnect() }
+        } finally { try { conn?.inputStream?.close() } catch (_: Exception) {}; try { conn?.disconnect() } catch (_: Exception) {} }
     }
 
     private suspend fun emitSnapshotLoop(collector: kotlinx.coroutines.flow.FlowCollector<CameraFrame>) {
+        val opts = BitmapFactory.Options().apply { inSampleSize = 1; inPreferredConfig = Bitmap.Config.RGB_565 }
         while (isRunning) {
+            coroutineContext.ensureActive()
             val t0 = System.currentTimeMillis()
+            var conn: HttpURLConnection? = null
             try {
                 val url = URL("$baseUrl/snapshot")
-                val conn = (url.openConnection() as HttpURLConnection).apply {
+                conn = (url.openConnection() as HttpURLConnection).apply {
                     connectTimeout = jpegQualityTimeoutMs; readTimeout = jpegQualityTimeoutMs
                 }
                 val bytes = conn.inputStream.readBytes()
-                conn.disconnect()
-                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                 if (bmp != null) {
                     latencyMs = System.currentTimeMillis() - t0
                     collector.emit(CameraFrame(bmp, System.currentTimeMillis()))
                 }
             } catch (_: Exception) { /* dropped frame — tolerated */ }
+            finally { try { conn?.disconnect() } catch (_: Exception) {} }
             delay(100) // ~10 FPS snapshot polling (§19)
         }
     }

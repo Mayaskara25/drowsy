@@ -7,13 +7,13 @@ import com.drowsy.alerts.PhoneAlertManager
 import com.drowsy.camera.CameraSource
 import com.drowsy.data.*
 import com.drowsy.fatigue.*
-import com.drowsy.location.FixedLocationProvider
-import com.drowsy.location.FusedLocationProvider
+import com.drowsy.location.LocationProvider
 import com.drowsy.metrics.PerformanceMetrics
 import com.drowsy.perception.DriverPerceptionEngine
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 data class UiState(
     val state: DriverState = DriverState.NORMAL,
@@ -34,9 +34,15 @@ class MonitorViewModel(
     private val perception: DriverPerceptionEngine,
     private val fatigue: FatigueEngine = FatigueEngine(),
     private val stateMachine: DriverStateMachine = DriverStateMachine(fatigue.thresholds),
-    private val alerts: PhoneAlertManager = PhoneAlertManager(app),
     private val metrics: PerformanceMetrics = PerformanceMetrics(),
+    private val locationProvider: LocationProvider? = null,
+    private val deviceId: String = app.getSharedPreferences("drowsy", 0).getString("device_id", null) ?: run {
+        val id = "DEV-${java.util.UUID.randomUUID().toString().take(8)}"
+        app.getSharedPreferences("drowsy", 0).edit().putString("device_id", id).apply(); id
+    },
+    private val vehicleId: String = app.getSharedPreferences("drowsy", 0).getString("vehicle_id", "DEMO-001")!!,
 ) : AndroidViewModel(app) {
+    private val alerts = PhoneAlertManager(app, scope = viewModelScope)
 
     private val db = (app as com.drowsy.DrowsyApp).db
     private val _ui = MutableStateFlow(UiState())
@@ -54,13 +60,13 @@ class MonitorViewModel(
             camera.frames().collect { frame ->
                 metrics.onFrameReceived()
                 val t0 = System.currentTimeMillis()
-                val pf = try { perception.processFrame(frame) } catch (_: Exception) { null; }
+                val pf = try { with(kotlinx.coroutines.Dispatchers.Default) { perception.processFrame(frame) } } catch (_: Exception) { null; }
                 if (pf == null) { metrics.onDropped(); return@collect }
                 val (score, snap) = fatigue.update(pf)
                 val canAlert = fatigue.canAlert(pf.timestampMs)
                 val state = stateMachine.step(score, pf.timestampMs)
-                alerts.handleState(state, pf.timestampMs, canAlert)
-                if (state == DriverState.FATIGUE || state == DriverState.HIGH_RISK) fatigue.markAlert(pf.timestampMs)
+                val didAlert = alerts.handleState(state, pf.timestampMs, canAlert)
+                if (didAlert) fatigue.markAlert(pf.timestampMs)
 
                 metrics.onInferenceDone(System.currentTimeMillis() - t0, pf.faceConfidence, pf.trackingQuality, score, state.name)
                 _ui.value = UiState(
@@ -82,15 +88,17 @@ class MonitorViewModel(
     fun stop() { job?.cancel(); job = null; camera.stop() }
 
     private suspend fun handleEventLifecycle(pf: com.drowsy.perception.PerceptionFrame, score: Int, snap: TemporalSnapshot, state: DriverState) {
+        // Resolve GPS with 2s timeout, fallback 0,0 — does not block state machine
+        val gps = withTimeoutOrNull(2000) { locationProvider?.lastFix() }
         if (state == DriverState.FATIGUE || state == DriverState.HIGH_RISK) {
             if (activeEvent == null) {
                 activeEvent = FatigueEvent(
-                    deviceId = "DEMO-DEVICE-001", vehicleId = "DEMO-001",
+                    deviceId = deviceId, vehicleId = vehicleId,
                     timestampStart = pf.timestampMs, timestampEnd = pf.timestampMs,
                     durationMs = 0, severity = if (state==DriverState.HIGH_RISK) Severity.HIGH.name else Severity.MEDIUM.name,
                     maxFatigueScore = score, eyeClosure = snap.prolongedClosure, yawning = snap.yawnCount>0,
                     headPoseAbnormal = pf.headPose?.abnormal==true, alertTriggered = true, recovered = false,
-                    gpsLat = 0.0, gpsLng = 0.0, trackingQuality = pf.trackingQuality,
+                    gpsLat = gps?.lat ?: 0.0, gpsLng = gps?.lng ?: 0.0, trackingQuality = pf.trackingQuality,
                 )
                 maxScoreInEvent = score
             } else {

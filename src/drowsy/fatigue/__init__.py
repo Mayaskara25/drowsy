@@ -86,6 +86,7 @@ class TemporalFeatureBuffer:
             cur_dur = now_ms - self._closure_start_ms
             max_closure = max(max_closure, cur_dur)
         # blink count: count transitions open->closed->open with duration < prolonged threshold
+        # blink count: only 100ms < dur < eye_closure_min_ms (prolonged excluded)
         blink_count = 0
         in_closure = False
         closure_start = None
@@ -96,16 +97,13 @@ class TemporalFeatureBuffer:
                 closure_start = fr.timestamp_ms
             elif not closed_now and in_closure:
                 dur = fr.timestamp_ms - (closure_start or fr.timestamp_ms)
-                if dur < self.pconfig.eye_closure_min_ms:
-                    # will still count? Actually short blink
-                    pass
-                # count every closure as blink candidate; prolonged handled separately
-                blink_count += 1
+                if 100 <= dur < self.pconfig.eye_closure_min_ms:
+                    blink_count += 1
                 in_closure = False
         head_ab = sum(1 for fr in self.frames if fr.head_pose and fr.head_pose.abnormal) / total
         gaze_off = sum(1 for fr in self.frames if fr.gaze and fr.gaze.forward_prob < 0.5) / total
         tq = sum(fr.tracking_quality for fr in self.frames) / total
-        currently_closed = bool(self.frames[-1].eye and self.frames[-1].eye.eyes_closed) if self.frames else False
+        currently_closed = bool(self.frames[-1].eye and self.frames[-1].eye.eyes_closed and self.frames[-1].face_present) if self.frames else False
         prolonged = max_closure >= self.pconfig.eye_closure_min_ms
         yawn_count = len(self._yawn_events)
         # if currently yawning long enough, count it
@@ -186,18 +184,19 @@ class DriverStateMachine:
     def step(self, score: int, now_ms: int) -> DriverState:
         prev = self.state
         h = self.thresholds.hysteresis
-        # upward transitions
-        if self.state == DriverState.NORMAL and score >= self.thresholds.attention:
+        # upward — check highest threshold first to allow skip
+        if self.state == DriverState.NORMAL and score >= self.thresholds.high_risk:
+            self.state = DriverState.HIGH_RISK
+        elif self.state == DriverState.NORMAL and score >= self.thresholds.fatigue:
+            self.state = DriverState.FATIGUE
+        elif self.state == DriverState.NORMAL and score >= self.thresholds.attention:
             self.state = DriverState.ATTENTION
+        elif self.state == DriverState.ATTENTION and score >= self.thresholds.high_risk:
+            self.state = DriverState.HIGH_RISK
         elif self.state == DriverState.ATTENTION and score >= self.thresholds.fatigue:
             self.state = DriverState.FATIGUE
         elif self.state == DriverState.FATIGUE and score >= self.thresholds.high_risk:
             self.state = DriverState.HIGH_RISK
-        elif self.state == DriverState.ATTENTION and score >= self.thresholds.high_risk:
-            # skip level if severe
-            self.state = DriverState.HIGH_RISK
-        elif self.state == DriverState.NORMAL and score >= self.thresholds.fatigue:
-            self.state = DriverState.FATIGUE
         # downward with hysteresis
         elif self.state == DriverState.HIGH_RISK and score <= self.thresholds.high_risk - h:
             # need sustained normal: go to FATIGUE first, then gradually down

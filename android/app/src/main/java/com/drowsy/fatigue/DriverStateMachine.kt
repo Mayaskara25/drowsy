@@ -16,16 +16,18 @@ class DriverStateMachine(
     var lastTransitionMs: Long? = null
         private set
     val history: MutableList<Triple<Long, DriverState, Int>> = mutableListOf()
+    private val maxHistory = 100
 
     fun step(score: Int, nowMs: Long): DriverState {
         val prev = state
         val h = thresholds.hysteresis
         state = when {
+            state == DriverState.NORMAL && score >= thresholds.highRisk -> DriverState.HIGH_RISK
+            state == DriverState.NORMAL && score >= thresholds.fatigue -> DriverState.FATIGUE
             state == DriverState.NORMAL && score >= thresholds.attention -> DriverState.ATTENTION
+            state == DriverState.ATTENTION && score >= thresholds.highRisk -> DriverState.HIGH_RISK
             state == DriverState.ATTENTION && score >= thresholds.fatigue -> DriverState.FATIGUE
             state == DriverState.FATIGUE && score >= thresholds.highRisk -> DriverState.HIGH_RISK
-            state == DriverState.ATTENTION && score >= thresholds.highRisk -> DriverState.HIGH_RISK
-            state == DriverState.NORMAL && score >= thresholds.fatigue -> DriverState.FATIGUE
             // downward with hysteresis
             state == DriverState.HIGH_RISK && score <= thresholds.highRisk - h ->
                 if (score >= thresholds.fatigue - h) DriverState.FATIGUE
@@ -38,6 +40,7 @@ class DriverStateMachine(
         if (state != prev) {
             lastTransitionMs = nowMs
             history.add(Triple(nowMs, state, score))
+            if (history.size > maxHistory) history.removeAt(0)
         }
         return state
     }
