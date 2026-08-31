@@ -85,8 +85,8 @@ fun DrowsyScreen(vm: MonitorViewModel, camera: AndroidFrontCameraSource? = null)
             }
         }
         StatusCard(ui)
-        // Dev overlay (§21) — disable in clean demo
-        if (androidx.compose.ui.platform.LocalInspectionMode.current.not()) {
+        // Dev overlay (§21) — auto-hidden in release via BuildConfig
+        if (com.drowsy.BuildConfig.ENABLE_PERF_OVERLAY) {
             PerfOverlay(perf)
         }
         Text("Events today: ${ui.eventsToday}", style = MaterialTheme.typography.bodyMedium)

@@ -17,6 +17,8 @@ android/build/
 *.apk
 *.aab
 local.properties
+# MediaPipe model (download via assets/README.md)
+android/app/src/main/assets/*.task
 # ESP32
 esp32/.pio/
 esp32/.pioenvs/

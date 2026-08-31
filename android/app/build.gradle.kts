@@ -23,9 +23,9 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            buildConfigField("boolean", "ENABLE_PERF_OVERLAY", "false")
         }
         debug {
-            // dev overlay enabled
             buildConfigField("boolean", "ENABLE_PERF_OVERLAY", "true")
         }
     }
