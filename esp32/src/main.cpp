@@ -17,8 +17,8 @@ static httpd_handle_t snapshot_httpd = NULL;
 static esp_err_t status_handler(httpd_req_t *req) {
   char buf[256];
   snprintf(buf, sizeof(buf),
-    "{\"uptime\":%lu,\"width\":%d,\"height\":%d,\"fps\":15}",
-    millis()/1000, 640, 480);
+    "{\"uptime\":%lu,\"width\":%d,\"height\":%d,\"fps\":10,\"clients\":%d}",
+    millis()/1000, 640, 480, WiFi.softAPgetStationNum());
   httpd_resp_set_type(req, "application/json");
   return httpd_resp_send(req, buf, strlen(buf));
 }
@@ -77,8 +77,8 @@ void setup() {
   cfg.pin_sccb_sda = 26; cfg.pin_sccb_scl = 27; cfg.pin_pwdn = 32; cfg.pin_reset = -1;
   cfg.xclk_freq_hz = 20000000; cfg.pixel_format = PIXFORMAT_JPEG;
   cfg.frame_size = FRAMESIZE_VGA; // 640x480 (§19)
-  cfg.jpeg_quality = 12; // 0-63 lower=better, ~70 quality
-  cfg.fb_count = 2; cfg.fb_location = CAMERA_FB_IN_PSRAM; cfg.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  cfg.jpeg_quality = 12; // 0-63 lower=better, ~70 quality (spec 60-75 JPEG ≈ 12)
+  cfg.fb_count = 2; cfg.fb_location = CAMERA_FB_IN_PSRAM; cfg.grab_mode = CAMERA_GRAB_LATEST;
   esp_err_t err = esp_camera_init(&cfg);
   if (err != ESP_OK) Serial.printf("Camera init failed %d\n", err);
   startServer();

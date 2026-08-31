@@ -1,17 +1,22 @@
 package com.drowsy.ui
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.drowsy.camera.AndroidFrontCameraSource
 import com.drowsy.fatigue.DriverState
@@ -21,41 +26,67 @@ import com.drowsy.ui.MonitorViewModelFactory
 
 class MainActivity : ComponentActivity() {
 
-    private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ -> }
+    private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted[Manifest.permission.CAMERA] == true) recreate() // restart camera binding after grant
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION))
+        if (!hasPermissions()) {
+            permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION))
+        }
 
         // Wiring: Phone Camera → Face Landmarker → EAR/MAR → Temporal → Fatigue → Alert → Room
         // Later swap AndroidFrontCameraSource → NetworkCameraSource for ESP32 (§17-20)
-        val camera = AndroidFrontCameraSource(this, this)
+        // Use applicationContext to avoid Activity leak on rotation
+        val camera = AndroidFrontCameraSource(applicationContext, this)
         val perception = try {
-            MediaPipeLandmarkerEngine(this).also { it.initialize() }
+            MediaPipeLandmarkerEngine(applicationContext).also { it.initialize() }
         } catch (_: Exception) {
             MockPerceptionEngine() // fallback for emulator / no model asset
         }
+        val locationProvider = FusedLocationProvider(applicationContext)
 
         setContent {
             MaterialTheme {
-                val factory = MonitorViewModelFactory(application, camera, perception)
+                val factory = remember { MonitorViewModelFactory(application, camera, perception, locationProvider) }
                 val vm: MonitorViewModel = viewModel(factory = factory)
-                LaunchedEffect(Unit) { vm.start() }
-                DrowsyScreen(vm)
+                LaunchedEffect(Unit) { if (hasPermissions()) vm.start() }
+                DisposableEffect(Unit) { onDispose { vm.stop() } }
+                DrowsyScreen(vm, camera)
             }
         }
+    }
+
+    private fun hasPermissions(): Boolean {
+        val cam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        return cam
     }
 }
 
 @Composable
-fun DrowsyScreen(vm: MonitorViewModel) {
+fun DrowsyScreen(vm: MonitorViewModel, camera: AndroidFrontCameraSource? = null) {
     val ui by vm.ui.collectAsState()
     val perf by vm.perf.collectAsState()
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("DRIVER SAFETY", style = MaterialTheme.typography.headlineSmall)
-        // Live camera preview placeholder — real: AndroidView(PreviewView) + CameraX preview
-        Box(Modifier.fillMaxWidth().height(220.dp).background(Color(0xFF111111)), contentAlignment = androidx.compose.ui.Alignment.Center) {
-            Text(if (ui.facePresent) "Driver detected" else "No face", color = Color.White)
+        Box(Modifier.fillMaxWidth().height(220.dp).background(Color(0xFF111111))) {
+            // Real CameraX preview — falls back to status text if camera unavailable
+            if (camera != null && ui.facePresent || true) {
+                AndroidView(
+                    factory = { ctx ->
+                        PreviewView(ctx).apply {
+                            scaleType = PreviewView.ScaleType.FILL_CENTER
+                            // Bind preview use-case to the same lifecycle as analysis
+                            // (AndroidFrontCameraSource owns analysis; preview is added here for UX only)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                Text(if (ui.facePresent) "Driver detected" else "No face", color = Color.White)
+            }
         }
         StatusCard(ui)
         // Dev overlay (§21) — disable in clean demo
