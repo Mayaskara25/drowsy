@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+.venv/
+*.db
+*.db-journal
+backend.db
+drowsy.db
+drowsy_local.db
+dist/
+node_modules/
+.DS_Store
+graphify-out/
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+*.apk
+*.aab
+local.properties
+# ESP32
+esp32/.pio/
+esp32/.pioenvs/

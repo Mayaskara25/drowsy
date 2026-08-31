@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Drowsy — Fleet Dashboard</title>
+<style>
+*{box-sizing:border-box;font-family:Inter,system-ui,sans-serif}
+body{margin:0;background:#0f1115;color:#e6e8eb}
+header{padding:20px 24px;border-bottom:1px solid #222;display:flex;justify-content:space-between;align-items:center}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:20px}
+.card{background:#1a1d23;border:1px solid #2a2e36;border-radius:12px;padding:16px}
+.card h3{margin:0 0 6px;font-size:12px;letter-spacing:.08em;color:#8b93a1}
+.card .big{font-size:28px;font-weight:700}
+.grid{display:grid;grid-template-columns:1.4fr .9fr;gap:16px;padding:0 20px 20px}
+.panel{background:#1a1d23;border:1px solid #2a2e36;border-radius:12px;padding:16px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;color:#8b93a1;font-size:12px;padding:8px;border-bottom:1px solid #2a2e36}
+td{padding:8px;border-bottom:1px solid #222}
+.badge{padding:3px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.HIGH{background:#3a1a1a;color:#ff6b6b;border:1px solid #6b2a2a}
+.MEDIUM{background:#3a331a;color:#ffd166;border:1px solid #6b5a1a}
+.LOW{background:#1a2e1a;color:#7bd389;border:1px solid #2a6b3a}
+a{color:#7aa5ff;text-decoration:none}
+#timeline div{padding:6px 0;border-bottom:1px solid #222;font-size:14px}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div><strong>DRIVER SAFETY</strong> — Fleet Dashboard <span id="live" style="margin-left:12px;font-size:12px;color:#8b93a1"></span></div>
+  <div><a href="/docs">API docs</a></div>
+</header>
+<div class="cards">
+  <div class="card"><h3>TOTAL VEHICLES</h3><div class="big" id="total">—</div></div>
+  <div class="card"><h3>ACTIVE</h3><div class="big" id="active">—</div></div>
+  <div class="card"><h3>FATIGUE EVENTS TODAY</h3><div class="big" id="today">—</div></div>
+  <div class="card"><h3>HIGH-RISK EVENTS</h3><div class="big" id="high">—</div></div>
+</div>
+<div class="grid">
+  <div class="panel">
+    <h3 style="margin-top:0">Vehicles</h3>
+    <table><thead><tr><th>Vehicle</th><th>Status</th><th>Score</th><th>Last seen</th></tr></thead><tbody id="vehicles"></tbody></table>
+  </div>
+  <div class="panel">
+    <h3 style="margin-top:0">Event timeline — <span id="vehTitle">select vehicle</span></h3>
+    <div id="timeline">—</div>
+  </div>
+</div>
+<div class="panel" style="margin:0 20px 20px">
+  <h3 style="margin-top:0">Recent events</h3>
+  <table><thead><tr><th>Time</th><th>Vehicle</th><th>Severity</th><th>Score</th><th>Duration</th><th>Signals</th></tr></thead><tbody id="events"></tbody></table>
+</div>
+<script>
+const API = location.origin;
+async function jget(p){ const r=await fetch(API+p); return r.json(); }
+async function refresh(){
+  const s=await jget('/api/dashboard/summary');
+  document.getElementById('total').textContent=s.totalVehicles;
+  document.getElementById('active').textContent=s.active;
+  document.getElementById('today').textContent=s.fatigueEventsToday;
+  document.getElementById('high').textContent=s.highRiskEvents;
+  const vs=await jget('/api/vehicles');
+  const tb=document.getElementById('vehicles');
+  tb.innerHTML='';
+  const evBody=document.getElementById('events');
+  evBody.innerHTML='';
+  let allEvents=[];
+  for(const v of vs){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td><a href="#" onclick="loadTimeline('${v.vehicleId}');return false">${v.vehicleId}</a></td><td>${v.lastState}</td><td>${v.lastScore}</td><td>${v.lastSeen? new Date(v.lastSeen).toLocaleString(): '—'}</td>`;
+    tb.appendChild(tr);
+    try{
+      const evs=await jget(`/api/vehicles/${v.vehicleId}/events?limit=20`);
+      for(const e of evs) allEvents.push({...e, vehicleId:v.vehicleId});
+      if(vs[0] && v.vehicleId===vs[0].vehicleId) renderTimeline(evs, v.vehicleId);
+    }catch{}
+  }
+  allEvents.sort((a,b)=> new Date(b.timestampStart)-new Date(a.timestampStart));
+  for(const e of allEvents.slice(0,20)){
+    const sig=[e.eyeClosure?'eye':null,e.yawning?'yawn':null,e.headPoseAbnormal?'head':null].filter(Boolean).join(',')||'—';
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${new Date(e.timestampStart).toLocaleString()}</td><td>${e.vehicleId}</td><td><span class="badge ${e.severity}">${e.severity}</span></td><td>${e.maxFatigueScore}</td><td>${(e.durationMs/1000).toFixed(1)}s</td><td>${sig}</td>`;
+    evBody.appendChild(tr);
+  }
+  document.getElementById('live').textContent='live · '+new Date().toLocaleTimeString();
+}
+function renderTimeline(evs, vid){
+  document.getElementById('vehTitle').textContent=vid;
+  const tl=document.getElementById('timeline');
+  if(!evs.length){ tl.textContent='No events'; return; }
+  tl.innerHTML=evs.map(e=>`<div><span class="badge ${e.severity}">${e.severity}</span> ${new Date(e.timestampStart).toLocaleTimeString()} — score ${e.maxFatigueScore} — ${(e.durationMs/1000).toFixed(1)}s — ${e.recovered?'recovered':'ongoing'}</div>`).join('');
+}
+async function loadTimeline(vid){
+  const evs=await jget(`/api/vehicles/${vid}/events?limit=20`);
+  renderTimeline(evs, vid);
+}
+refresh(); setInterval(refresh, 3000);
+</script>
+</body>
+</html>
