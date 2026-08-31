@@ -7,9 +7,21 @@
 #include <esp_camera.h>
 #include <esp_http_server.h>
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#ifndef AP_SSID
 #define AP_SSID "DRIVER-CAM"
+#endif
+#ifndef AP_PASS
 #define AP_PASS "drowsy123"
+#endif
+#ifndef AP_CHANNEL
 #define AP_CHANNEL 6
+#endif
+#ifndef AP_MAX_CLIENTS
+#define AP_MAX_CLIENTS 4
+#endif
 
 static httpd_handle_t stream_httpd = NULL;
 static httpd_handle_t snapshot_httpd = NULL;
@@ -65,16 +77,33 @@ void startServer() {
 
 void setup() {
   Serial.begin(115200);
-  // Wi-Fi AP mode — direct demo (§18)
-  WiFi.softAP(AP_SSID, AP_PASS, AP_CHANNEL, 0, 4);
+  // Wi-Fi — secrets.h optional; defaults to direct demo AP (§18, docs/hardware.md:3)
+  WiFi.softAP(AP_SSID, AP_PASS, AP_CHANNEL, 0, AP_MAX_CLIENTS);
   Serial.printf("AP %s at %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+#ifdef USE_STA
+#if USE_STA
+  if (String(STA_SSID).length() > 0) {
+    WiFi.begin(STA_SSID, STA_PASS);
+    Serial.printf("STA connecting to %s ...\n", STA_SSID);
+  }
+#endif
+#endif
 
   camera_config_t cfg{};
   cfg.ledc_channel = LEDC_CHANNEL_0; cfg.ledc_timer = LEDC_TIMER_0;
+#ifdef PWDN_GPIO_NUM
+  cfg.pin_pwdn = PWDN_GPIO_NUM; cfg.pin_reset = RESET_GPIO_NUM;
+  cfg.pin_xclk = XCLK_GPIO_NUM; cfg.pin_pclk = PCLK_GPIO_NUM;
+  cfg.pin_vsync = VSYNC_GPIO_NUM; cfg.pin_href = HREF_GPIO_NUM;
+  cfg.pin_sccb_sda = SIOD_GPIO_NUM; cfg.pin_sccb_scl = SIOC_GPIO_NUM;
+  cfg.pin_d0 = Y2_GPIO_NUM; cfg.pin_d1 = Y3_GPIO_NUM; cfg.pin_d2 = Y4_GPIO_NUM; cfg.pin_d3 = Y5_GPIO_NUM;
+  cfg.pin_d4 = Y6_GPIO_NUM; cfg.pin_d5 = Y7_GPIO_NUM; cfg.pin_d6 = Y8_GPIO_NUM; cfg.pin_d7 = Y9_GPIO_NUM;
+#else
   cfg.pin_d0 = 5; cfg.pin_d1 = 18; cfg.pin_d2 = 19; cfg.pin_d3 = 21;
   cfg.pin_d4 = 36; cfg.pin_d5 = 39; cfg.pin_d6 = 34; cfg.pin_d7 = 35;
   cfg.pin_xclk = 0; cfg.pin_pclk = 22; cfg.pin_vsync = 25; cfg.pin_href = 23;
   cfg.pin_sccb_sda = 26; cfg.pin_sccb_scl = 27; cfg.pin_pwdn = 32; cfg.pin_reset = -1;
+#endif
   cfg.xclk_freq_hz = 20000000; cfg.pixel_format = PIXFORMAT_JPEG;
   cfg.frame_size = FRAMESIZE_VGA; // 640x480 (§19)
   cfg.jpeg_quality = 12; // 0-63 lower=better, ~70 quality (spec 60-75 JPEG ≈ 12)

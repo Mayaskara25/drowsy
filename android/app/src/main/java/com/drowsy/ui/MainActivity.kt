@@ -37,9 +37,9 @@ class MainActivity : ComponentActivity() {
         }
 
         // Wiring: Phone Camera → Face Landmarker → EAR/MAR → Temporal → Fatigue → Alert → Room
-        // Later swap AndroidFrontCameraSource → NetworkCameraSource for ESP32 (§17-20)
-        // Use applicationContext to avoid Activity leak on rotation
-        val camera = AndroidFrontCameraSource(applicationContext, this)
+        // Camera source is per-device config (gitignored) — see assets/config.json.example + docs/hardware.md:5
+        // Defaults to front camera so clone without ESP32 still demos.
+        val camera = createCameraSource()
         val perception = try {
             MediaPipeLandmarkerEngine(applicationContext).also { it.initialize() }
         } catch (_: Exception) {
@@ -55,6 +55,22 @@ class MainActivity : ComponentActivity() {
                 DisposableEffect(Unit) { onDispose { vm.stop() } }
                 DrowsyScreen(vm, camera)
             }
+        }
+    }
+
+    private fun createCameraSource(): com.drowsy.camera.CameraSource {
+        // Read assets/config.json if present (gitignored per-device)
+        val cfg = try {
+            assets.open("config.json").bufferedReader().readText().let { org.json.JSONObject(it) }
+        } catch (_: Exception) { null }
+        val source = cfg?.optString("camera_source", "front") ?: "front"
+        val url = cfg?.optString("network_camera_url", "http://192.168.4.1") ?: "http://192.168.4.1"
+        return if (source == "network") {
+            com.drowsy.camera.NetworkCameraSource(url)
+        } else if (source == "uvc") {
+            com.drowsy.camera.UsbUvcCameraSource()
+        } else {
+            AndroidFrontCameraSource(applicationContext, this)
         }
     }
 

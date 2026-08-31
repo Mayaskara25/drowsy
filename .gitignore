@@ -19,6 +19,9 @@ android/build/
 local.properties
 # MediaPipe model (download via assets/README.md)
 android/app/src/main/assets/*.task
+# Per-device config (see assets/config.json.example, esp32/include/secrets.h.example)
+android/app/src/main/assets/config.json
+esp32/include/secrets.h
 # ESP32
 esp32/.pio/
 esp32/.pioenvs/
