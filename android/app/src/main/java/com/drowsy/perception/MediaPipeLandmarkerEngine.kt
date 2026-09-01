@@ -56,7 +56,7 @@ class MediaPipeLandmarkerEngine(
 
         return try {
             val mpImage = BitmapImageBuilder(frame.bitmap).build()
-            val result = try { lm.detectForVideo(mpImage, frame.timestampMs) } finally { try { mpImage.close() } catch (_: Exception) {} }
+            val result = try { lm.detectForVideo(mpImage, frame.timestampMs * 1000) } finally { try { mpImage.close() } catch (_: Exception) {} }
             if (result.detections().isEmpty()) {
                 return PerceptionFrame(false, 0f, 0f, 0.1f, timestampMs = frame.timestampMs)
             }

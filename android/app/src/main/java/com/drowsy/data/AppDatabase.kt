@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 
 @Database(
     entities = [Vehicle::class, Device::class, FatigueEvent::class, AlertEvent::class, SyncQueue::class, AppSettings::class, Calibration::class, Trip::class],
-    version = 1, exportSchema = true
+    version = 1, exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun vehicleDao(): VehicleDao
@@ -21,7 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var INSTANCE: AppDatabase? = null
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "drowsy.db")
-                .fallbackToDestructiveMigrationOnDowngrade()
+                .fallbackToDestructiveMigration()
                 .build().also { INSTANCE = it }
         }
         fun inMemory(context: Context): AppDatabase =

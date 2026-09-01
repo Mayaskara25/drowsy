@@ -35,6 +35,13 @@ class FatigueEngine(
         return score to snap
     }
 
+    /** Returns true if an alert was triggered (for cooldown tracking). */
+    fun handleAlert(nowMs: Long): Boolean {
+        if (!canAlert(nowMs)) return false
+        markAlert(nowMs)
+        return true
+    }
+
     fun canAlert(nowMs: Long): Boolean {
         val last = lastAlertMs ?: return true
         return (nowMs - last) >= (thresholds.alertCooldownS * 1000).toLong()

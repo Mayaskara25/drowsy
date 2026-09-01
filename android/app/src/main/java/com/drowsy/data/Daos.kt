@@ -6,7 +6,7 @@ import androidx.room.*
 interface VehicleDao {
     @Query("SELECT * FROM vehicles") suspend fun all(): List<Vehicle>
     @Query("SELECT * FROM vehicles WHERE vehicleId = :id LIMIT 1") suspend fun byId(id: String): Vehicle?
-    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(v: Vehicle)
+    @Upsert suspend fun upsert(v: Vehicle)
 }
 
 @Dao

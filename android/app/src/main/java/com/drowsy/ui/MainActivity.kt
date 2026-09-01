@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun DrowsyScreen(vm: MonitorViewModel, camera: AndroidFrontCameraSource? = null) {
+fun DrowsyScreen(vm: MonitorViewModel, camera: CameraSource? = null) {
     val ui by vm.ui.collectAsState()
     val perf by vm.perf.collectAsState()
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -1,6 +1,6 @@
 package com.drowsy.camera
 
-import android.graphics.Bitmap
+import androidx.camera.view.PreviewView
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -20,4 +20,5 @@ interface CameraSource {
     fun frames(): Flow<CameraFrame>
     val name: String
     val isRunning: Boolean
+    fun attachPreview(previewView: PreviewView) {}
 }

@@ -63,10 +63,9 @@ class MonitorViewModel(
                 val pf = try { with(kotlinx.coroutines.Dispatchers.Default) { perception.processFrame(frame) } } catch (_: Exception) { null; }
                 if (pf == null) { metrics.onDropped(); return@collect }
                 val (score, snap) = fatigue.update(pf)
-                val canAlert = fatigue.canAlert(pf.timestampMs)
+                val didAlert = fatigue.handleAlert(pf.timestampMs)
                 val state = stateMachine.step(score, pf.timestampMs)
-                val didAlert = alerts.handleState(state, pf.timestampMs, canAlert)
-                if (didAlert) fatigue.markAlert(pf.timestampMs)
+                alerts.handleState(state, pf.timestampMs, didAlert)
 
                 metrics.onInferenceDone(System.currentTimeMillis() - t0, pf.faceConfidence, pf.trackingQuality, score, state.name)
                 _ui.value = UiState(
