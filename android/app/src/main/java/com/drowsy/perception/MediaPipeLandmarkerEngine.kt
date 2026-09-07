@@ -57,16 +57,13 @@ class MediaPipeLandmarkerEngine(
         return try {
             val mpImage = BitmapImageBuilder(frame.bitmap).build()
             val result = try { lm.detectForVideo(mpImage, frame.timestampMs * 1000) } finally { try { mpImage.close() } catch (_: Exception) {} }
-            if (result.detections().isEmpty()) {
-                return PerceptionFrame(false, 0f, 0f, 0.1f, timestampMs = frame.timestampMs)
-            }
-            val detection = result.detections()[0]
-            val faceConf = detection.categories().firstOrNull()?.score() ?: 0.7f
+            // FaceLandmarkerResult has no detections()/categories() — presence is "faceLandmarks() non-empty".
+            // It also carries no detection-confidence score; landmark-count ratio is the real quality signal.
             val landmarks = result.faceLandmarks().firstOrNull()
             if (landmarks == null || landmarks.isEmpty()) {
-                return PerceptionFrame(true, faceConf, 0.2f, 0.2f, timestampMs = frame.timestampMs)
+                return PerceptionFrame(false, 0f, 0f, 0.1f, timestampMs = frame.timestampMs)
             }
-            // NormalizedPoint → Point2D (already 0..1 normalized)
+            val faceConf = minFaceDetectionConfidence.coerceAtLeast(0.7f)
             val pts = landmarks.map { Point2D(it.x(), it.y()) }
             // Ensure 478 for MediaPipe Face Landmarker (468 + iris)
             val pf = geometry.process(pts, frame.timestampMs, faceConf)

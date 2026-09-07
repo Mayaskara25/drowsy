@@ -20,16 +20,16 @@ data class Vehicle(
 @Entity(tableName = "devices")
 data class Device(
     @PrimaryKey val deviceId: String,
-    @Index val vehicleId: String,
+    val vehicleId: String,
     val name: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
 )
 
-@Entity(tableName = "fatigue_events", indices = [Index("vehicleId"), Index("severity"), Index("synced")])
+@Entity(tableName = "fatigue_events", indices = [Index(value = ["vehicleId"]), Index(value = ["severity"]), Index(value = ["synced"])])
 data class FatigueEvent(
     @PrimaryKey val eventId: String = UUID.randomUUID().toString(),
-    @Index val deviceId: String,
-    @Index val vehicleId: String,
+    val deviceId: String,
+    val vehicleId: String,
     val timestampStart: Long,
     val timestampEnd: Long,
     val durationMs: Int,

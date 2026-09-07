@@ -1,5 +1,6 @@
 package com.drowsy.camera
 
+import android.graphics.Bitmap
 import androidx.camera.view.PreviewView
 import kotlinx.coroutines.flow.Flow
 

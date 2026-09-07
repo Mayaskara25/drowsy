@@ -17,9 +17,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import android.util.Log
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.drowsy.camera.AndroidFrontCameraSource
+import com.drowsy.camera.CameraSource
 import com.drowsy.fatigue.DriverState
+import com.drowsy.location.FusedLocationProvider
 import com.drowsy.perception.MediaPipeLandmarkerEngine
 import com.drowsy.perception.MockPerceptionEngine
 import com.drowsy.ui.MonitorViewModelFactory
@@ -47,11 +50,15 @@ class MainActivity : ComponentActivity() {
         }
         val locationProvider = FusedLocationProvider(applicationContext)
 
+        Log.d("Drowsy", "MainActivity onCreate camera=$camera perception=$perception hasPerm=${hasPermissions()}")
         setContent {
             MaterialTheme {
                 val factory = remember { MonitorViewModelFactory(application, camera, perception, locationProvider) }
                 val vm: MonitorViewModel = viewModel(factory = factory)
-                LaunchedEffect(Unit) { if (hasPermissions()) vm.start() }
+                LaunchedEffect(Unit) {
+                    Log.d("Drowsy", "LaunchedEffect start hasPerm=${hasPermissions()}")
+                    if (hasPermissions()) vm.start()
+                }
                 DisposableEffect(Unit) { onDispose { vm.stop() } }
                 DrowsyScreen(vm, camera)
             }

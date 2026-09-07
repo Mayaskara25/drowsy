@@ -2,6 +2,7 @@ package com.drowsy.camera
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -37,19 +38,24 @@ class AndroidFrontCameraSource(
     }
 
     override fun start() {
+        Log.d("Drowsy", "AndroidFrontCameraSource.start() isRunning=$isRunning")
         if (isRunning) return
         try {
             val future = ProcessCameraProvider.getInstance(context)
             future.addListener({
                 try {
                     cameraProvider = future.get()
+                    Log.d("Drowsy", "CameraProvider obtained $cameraProvider")
                     bindAnalysis()
                     isRunning = true
-                } catch (_: Exception) {
+                    Log.d("Drowsy", "Camera start done isRunning=$isRunning")
+                } catch (e: Exception) {
+                    Log.e("Drowsy", "Camera start failed", e)
                     isRunning = false
                 }
             }, ContextCompat.getMainExecutor(context))
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e("Drowsy", "Camera start exception", e)
             isRunning = false
         }
     }
@@ -64,12 +70,23 @@ class AndroidFrontCameraSource(
     }
 
     override fun frames(): Flow<CameraFrame> = callbackFlow {
+        Log.d("Drowsy", "frames() collect attached")
         FrameHub.attach(channel)
-        awaitClose { FrameHub.detach() }
+        awaitClose {
+            Log.d("Drowsy", "frames() collect detached")
+            FrameHub.detach()
+        }
     }
 
     private var previewView: androidx.camera.view.PreviewView? = null
-    fun attachPreview(previewView: androidx.camera.view.PreviewView) { this.previewView = previewView }
+    override fun attachPreview(previewView: androidx.camera.view.PreviewView) {
+        this.previewView = previewView
+        // If camera already running, rebind to include Preview (Compose creates PreviewView after start())
+        if (isRunning && cameraProvider != null) {
+            try { cameraProvider?.unbindAll() } catch (_: Exception) {}
+            bindAnalysis()
+        }
+    }
 
     private fun bindAnalysis() {
         val provider = cameraProvider ?: return

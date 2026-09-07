@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 
 @Database(
     entities = [Vehicle::class, Device::class, FatigueEvent::class, AlertEvent::class, SyncQueue::class, AppSettings::class, Calibration::class, Trip::class],
